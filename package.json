@@ -1,0 +1,32 @@
+{
+  "name": "vmds",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AMDS — Arivu Mail Delivery System",
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "predev:gateway": "npm run build -w @vmds/shared",
+    "predev:worker": "npm run build -w @vmds/shared",
+    "dev": "concurrently -n gateway,worker -c blue,green \"npm run dev:gateway\" \"npm run dev:worker\"",
+    "dev:gateway": "npm run dev -w @vmds/gateway",
+    "dev:worker": "npm run dev -w @vmds/worker",
+    "build": "npm run build -w @vmds/shared && npm run build -w @vmds/gateway && npm run build -w @vmds/worker",
+    "validate:phase-0a": "node scripts/validate-phase-0a.js",
+    "db:migrate": "node scripts/migrate.js",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "setup": "npm install && npm run docker:up && sleep 3 && npm run db:migrate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

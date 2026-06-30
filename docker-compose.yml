@@ -1,0 +1,52 @@
+# Local development infrastructure for AMDS (VMDS)
+# Usage: docker compose up -d
+#
+# Services:
+#   PostgreSQL  → localhost:5432  (AMDS database)
+#   Redis       → localhost:6379  (queues, idempotency)
+#   Mailpit     → localhost:8025  (web UI), localhost:1025 (SMTP catch-all)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: amds-postgres
+    environment:
+      POSTGRES_USER: amds
+      POSTGRES_PASSWORD: amds
+      POSTGRES_DB: amds
+    ports:
+      - "5432:5432"
+    volumes:
+      - amds_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amds -d amds"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: amds-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - amds_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: amds-mailpit
+    ports:
+      - "8025:8025"   # Web UI — inspect captured emails
+      - "1025:1025"   # SMTP — AMDS worker sends here locally
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  amds_postgres_data:
+  amds_redis_data:

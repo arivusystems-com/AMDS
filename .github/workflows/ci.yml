@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+  validate-phase-0a:
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amds
+          POSTGRES_PASSWORD: amds
+          POSTGRES_DB: amds
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amds -d amds"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    env:
+      AMDS_PORT: 8080
+      NODE_ENV: test
+      DATABASE_URL: postgresql://amds:amds@localhost:5432/amds
+      REDIS_URL: redis://localhost:6379
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      AMDS_API_KEY: amds_ci_key
+      WEBHOOK_SIGNING_SECRET: ci_webhook_secret
+      LITEDESK_WEBHOOK_URL: http://localhost:3999/api/internal/webhooks/amds
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run db:migrate
+
+      - name: Start gateway and worker
+        run: |
+          npm run start -w @vmds/gateway &
+          npm run start -w @vmds/worker &
+          sleep 3
+
+      - run: npm run validate:phase-0a
