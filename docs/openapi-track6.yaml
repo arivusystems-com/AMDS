@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: AMDS Track 6 API
+  version: 1.0.0
+  description: |
+    Tenant policies, sender reputation, dynamic throughput, and campaign health.
+    All endpoints require `Authorization: Bearer <AMDS_API_KEY>` unless noted.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+paths:
+  /v1/tenants/{tenantId}/policy:
+    put:
+      summary: Upsert tenant policy (LiteDesk sync)
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, suspended] }
+                monthly_credits: { type: integer }
+                credits_remaining: { type: integer }
+                daily_send_limit: { type: integer }
+                max_hourly_rate: { type: integer }
+                burst_rate_per_min: { type: integer }
+                max_campaign_size: { type: integer }
+                warmup_enabled: { type: boolean }
+                reputation_enabled: { type: boolean }
+                ip_pool: { type: string, enum: [transaction, marketing] }
+    get:
+      summary: Get tenant policy
+
+  /v1/tenants/{tenantId}/credits:
+    patch:
+      summary: Allocate credits to tenant
+
+  /v1/tenants/{tenantId}/reputation:
+    get:
+      summary: Current sender reputation score and breakdown
+
+  /v1/tenants/{tenantId}/reputation/history:
+    get:
+      summary: Reputation score history
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+
+  /v1/tenants/{tenantId}/reputation/guidance:
+    get:
+      summary: Reputation change reasons and recommendations
+
+  /v1/tenants/{tenantId}/throughput:
+    get:
+      summary: Max vs effective throughput and multipliers
+
+  /v1/campaigns/{id}/estimate:
+    get:
+      summary: Campaign completion ETA
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: recipient_count
+          in: query
+          required: true
+          schema: { type: integer }
+
+  /v1/campaigns/{id}/health:
+    get:
+      summary: Per-campaign health score
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          schema: { type: string }
+
+  /v1/analytics/summary:
+    get:
+      summary: Delivery and engagement analytics
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: campaign_id
+          in: query
+          schema: { type: string }
+
+  /v1/admin/ip-pools:
+    get:
+      summary: List dedicated IP pools (transaction vs marketing)
+
+  /v1/openapi.yaml:
+    get:
+      summary: This OpenAPI specification (public, no auth)
+      security: []

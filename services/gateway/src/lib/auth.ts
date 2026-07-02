@@ -10,7 +10,16 @@ export function createAuthHook() {
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
-    if (request.url === '/health' || request.url === '/ready') {
+    const pathname = request.url.split('?')[0] ?? request.url;
+    if (
+      pathname === '/health' ||
+      pathname === '/ready' ||
+      pathname === '/metrics' ||
+      pathname === '/v1/openapi.yaml' ||
+      pathname === '/v1/openapi.json' ||
+      pathname.startsWith('/t/') ||
+      pathname.startsWith('/c/')
+    ) {
       return;
     }
 

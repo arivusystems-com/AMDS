@@ -12,8 +12,17 @@ export function getPool(): pg.Pool {
 }
 
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
+  if (!pool) {
+    return;
   }
+
+  const activePool = pool;
+  pool = null;
+
+  await Promise.race([
+    activePool.end(),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 2_000);
+    }),
+  ]);
 }

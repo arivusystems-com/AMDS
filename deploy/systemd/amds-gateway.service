@@ -1,0 +1,19 @@
+[Unit]
+Description=AMDS Gateway
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=amds
+WorkingDirectory=/opt/amds
+EnvironmentFile=/opt/amds/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node services/gateway/dist/index.js
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

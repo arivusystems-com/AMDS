@@ -262,6 +262,8 @@ open http://localhost:8025
 
 #### What to validate locally before first OCI deploy
 
+**Track 1 (Phase 0a):**
+
 - [x] `POST /v1/messages` accepts payload and returns `202`
 - [x] Worker picks up queue job and Mailpit shows the email
 - [x] LiteDesk CRM/case email triggers send and stores `amds_message_id` on Communication
@@ -270,7 +272,16 @@ open http://localhost:8025
 - [x] Invalid auth rejected by gateway (`401`)
 - [x] Automated check: `npm run validate:phase-0a`
 
-See [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) for full exit record.
+**Track 2:**
+
+- [x] Soft SMTP failures retry and eventually deliver (Mailpit)
+- [x] Permanent failures move to dead letter (`status: dead_letter`)
+- [x] Webhook delivery retries when LiteDesk endpoint fails
+- [x] Per-tenant rate limit returns `429`
+- [x] `GET /v1/messages/:id` returns `events[]` timeline
+- [x] Automated check: `npm run validate:track-2`
+
+See [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) and [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md) for full exit records.
 
 #### First OCI deploy (when local checklist passes)
 
@@ -676,7 +687,7 @@ Campaign (Phase 3)
 | Webhook route in LiteDesk | Delivery event updates MongoDB ticket |
 | CI pipeline | Lint, test, build on every push |
 
-**Exit criteria (local):** LiteDesk outbound email → AMDS → Mailpit → webhook → `delivered` on Communication — all on localhost. **Complete** — see [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md).
+**Exit criteria (local):** LiteDesk outbound email → AMDS → Mailpit → webhook → `delivered` — all on localhost. **Track 1 complete** — see [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md). **Track 2 complete** — see [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md).
 
 #### Phase 0b — OCI (after local exit criteria pass)
 
@@ -869,7 +880,17 @@ Use this when wiring LiteDesk (OCI Compute #1) to AMDS (OCI Compute #2):
 
 ---
 
-## 16. Next Steps (Implementation Kickoff)
+## 16. Current status & next steps
+
+**Strategy:** Option A — build Tracks 1–4 locally (Mailpit), deploy to OCI once at end. See [BUILD-TO-DEPLOY.md](./BUILD-TO-DEPLOY.md).
+
+| Track | Status |
+|-------|--------|
+| Track 1 — Core pipeline (Phase 0a) | ✅ Complete |
+| Track 2 — Retry, DLQ, webhook retries, rate limits | ✅ Complete |
+| Track 3 — Domain auth, DKIM, bounces, scheduling | ✅ Complete (AMDS + LiteDesk) |
+| Track 4 — Campaigns, tracking, analytics | Next |
+| OCI deploy | After Tracks 3–4 |
 
 Decisions confirmed:
 
@@ -878,14 +899,8 @@ Decisions confirmed:
 | Network | **Same OCI VCN**, separate subnets, private API traffic |
 | LiteDesk stack | **Node.js + Vue 3 + MongoDB** |
 | AMDS stack | **Node.js (Fastify) + PostgreSQL + Redis** |
-| Phase 1 scope | Helpdesk transactional replies (recommended starting point) |
-
-Ready to start (**local first**):
-
-1. **Phase 0a** — VMDS repo scaffold + `docker compose up` + gateway/worker → Mailpit
-2. **Phase 0a (LiteDesk)** — `AmdsClient` + webhook route on `localhost:3000`
-3. **Validate locally** — full Helpdesk reply flow in Mailpit UI
-4. **Phase 0b** — OCI deploy when local checklist passes (env URL swap only)
+| SMTP (local) | **Mailpit** — no third-party relay |
+| SMTP (OCI) | **Direct MX delivery** (port 25) |
 
 ---
 
@@ -898,12 +913,20 @@ Ready to start (**local first**):
 AMDS_PORT=8080
 DATABASE_URL=postgresql://amds:amds@localhost:5432/amds
 REDIS_URL=redis://localhost:6379
+SMTP_MODE=mailpit          # use direct on OCI
 SMTP_HOST=localhost
-SMTP_PORT=1025          # Mailpit — no port 25 needed locally
+SMTP_PORT=1025             # Mailpit — no port 25 needed locally
 SMTP_SECURE=false
+SMTP_MAX_ATTEMPTS=6
+SMTP_RETRY_DELAY_MS=5000
+RATE_LIMIT_MAX=100
+RATE_LIMIT_WINDOW_SEC=60
+WEBHOOK_MAX_ATTEMPTS=15
+WEBHOOK_RETRY_DELAY_MS=60000
 WEBHOOK_SIGNING_SECRET=dev_webhook_secret
 LITEDESK_WEBHOOK_URL=http://host.docker.internal:3000/api/internal/webhooks/amds
 # On Mac, workers use host.docker.internal to reach LiteDesk on host
+AMDS_API_KEY=amds_dev_key
 
 # LiteDesk — .env in LiteDesk repo
 AMDS_BASE_URL=http://localhost:8080

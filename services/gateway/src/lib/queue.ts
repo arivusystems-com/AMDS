@@ -11,8 +11,8 @@ export function getQueue(): Queue<SendMessageJob> {
       defaultJobOptions: {
         removeOnComplete: 1000,
         removeOnFail: 5000,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
+        attempts: config.SMTP_MAX_ATTEMPTS,
+        backoff: { type: 'exponential', delay: config.SMTP_RETRY_DELAY_MS },
       },
     });
   }
@@ -20,8 +20,17 @@ export function getQueue(): Queue<SendMessageJob> {
 }
 
 export async function closeQueue(): Promise<void> {
-  if (queue) {
-    await queue.close();
-    queue = null;
+  if (!queue) {
+    return;
   }
+
+  const activeQueue = queue;
+  queue = null;
+
+  await Promise.race([
+    activeQueue.close(),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 2_000);
+    }),
+  ]);
 }

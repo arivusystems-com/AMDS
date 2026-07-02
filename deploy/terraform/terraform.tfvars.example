@@ -1,0 +1,4 @@
+compartment_id      = "ocid1.compartment.oc1..aaaa..."
+region              = "ap-mumbai-1"
+litedesk_private_ip = "10.0.2.10/32"
+ssh_public_key      = "ssh-rsa AAAA... user@host"
