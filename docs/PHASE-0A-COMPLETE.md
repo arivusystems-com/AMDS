@@ -88,13 +88,13 @@ All on localhost. Track 1 complete.
 
 ---
 
-## Next: Tracks 2–4 (local), then OCI
+## Next: Track 3 (local), then OCI
 
 Strategy **Option A** — build everything on localhost with Mailpit; deploy to OCI once all tracks pass. No third-party SMTP providers.
 
 See [BUILD-TO-DEPLOY.md](./BUILD-TO-DEPLOY.md):
 
-- **Track 2** — retry queue, webhook retries, rate limits, message events
+- ~~**Track 2** — retry queue, webhook retries, rate limits, message events~~ ✅ [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md)
 - **Track 3** — domain auth, DKIM, bounces, scheduling
 - **Track 4** — campaigns, tracking, analytics
 - **OCI deploy** — single cutover + first real inbox test (port 25)

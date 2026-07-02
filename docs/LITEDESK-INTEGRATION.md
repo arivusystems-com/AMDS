@@ -1,19 +1,19 @@
 # LiteDesk ↔ AMDS Integration Guide
 
-**Version:** 1.1  
-**Date:** June 29, 2026  
-**Phase:** Track 1 complete — building Tracks 2–4 locally, OCI deploy at end ([BUILD-TO-DEPLOY.md](./BUILD-TO-DEPLOY.md))  
+**Version:** 1.2  
+**Date:** June 30, 2026  
+**Phase:** Tracks 1–3 complete on both sides — Track 4 AMDS complete, LiteDesk next ([BUILD-TO-DEPLOY.md](./BUILD-TO-DEPLOY.md))  
 **Audience:** LiteDesk backend developers  
 
-This document describes the **LiteDesk ↔ AMDS** integration contract. Track 1 is **complete on both sides** for local development (AMDS → Mailpit, LiteDesk webhooks, CRM + Cases outbound). Use this as the reference when extending integration through local build tracks and final OCI deploy.
+This document describes the **LiteDesk ↔ AMDS** integration contract. Tracks 1–3 are **complete on both sides** for local development (Mailpit, webhooks, retry/DLQ, rate limits, domains, bounces, suppressions, scheduling). Use this as the reference when extending integration through Track 4 and final OCI deploy.
 
-See also: [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [AMDS-END-TO-END-ROADMAP.md](./AMDS-END-TO-END-ROADMAP.md)
+See also: [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md) · [TRACK-4-COMPLETE.md](./TRACK-4-COMPLETE.md) · [LITEDESK-TRACK-3-DRAFT.md](./LITEDESK-TRACK-3-DRAFT.md) · [LITEDESK-TRACK-4-DRAFT.md](./LITEDESK-TRACK-4-DRAFT.md) · [LITEDESK-INTEGRATION-AUDIT-CHECKLIST.md](./LITEDESK-INTEGRATION-AUDIT-CHECKLIST.md)
 
 ---
 
-## Implementation status (Phase 0a)
+## Implementation status
 
-### AMDS repo (this repository) — complete
+### Track 1 (Phase 0a) — complete
 
 | Item | Status |
 |------|--------|
@@ -29,7 +29,30 @@ See also: [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [AMDS-END-TO-END-ROA
 | Automated validation | Done — `npm run validate:phase-0a` |
 | CI (build + validation) | Done — `.github/workflows/ci.yml` |
 
-### LiteDesk repo — complete
+### Track 2 — AMDS complete (LiteDesk: no changes required)
+
+| Item | Status |
+|------|--------|
+| SMTP retry queue (soft failures, exponential backoff) | Done |
+| Dead letter queue (`status: dead_letter`) | Done |
+| Webhook delivery retries (AMDS → LiteDesk, outbox + backoff) | Done |
+| Per-tenant rate limiting (`429` on burst sends) | Done |
+| Message events on `GET /v1/messages/:id` | Done |
+| Direct SMTP module (`SMTP_MODE=direct`, for OCI) | Done |
+| Structured JSON logging | Done |
+| Migration `002_track2.sql` | Done |
+| Automated validation | Done — `npm run validate:track-2` |
+
+**LiteDesk action for Track 2:**
+
+| Topic | Recommendation |
+|-------|----------------|
+| Outbound send | No change — existing `AmdsClient` works |
+| Webhooks | No change — AMDS now retries failed webhook POSTs automatically |
+| `429` from AMDS | Treat like `5xx` — backoff and retry (safe due to idempotency key) |
+| Delivery UI | Optional — poll `GET /v1/messages/:id` and use `events[]` for timeline (future) |
+
+### LiteDesk repo — complete (Track 1)
 
 | Item | Status |
 |------|--------|
@@ -49,7 +72,32 @@ See also: [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [AMDS-END-TO-END-ROA
 LiteDesk send → AMDS POST /v1/messages → Worker → Mailpit → webhook → delivered
 ```
 
-**Not yet started:** Tracks 2–4 (see [BUILD-TO-DEPLOY.md](./BUILD-TO-DEPLOY.md)). OCI deploy and real inbox delivery happen once all local tracks pass.
+**Not yet started:** Track 4 LiteDesk (campaigns, tracking) — see [LITEDESK-TRACK-4-DRAFT.md](./LITEDESK-TRACK-4-DRAFT.md). AMDS Track 4 is complete ([TRACK-4-COMPLETE.md](./TRACK-4-COMPLETE.md)).
+
+### Track 3 — LiteDesk complete (June 30, 2026)
+
+| Item | Status |
+|------|--------|
+| `AmdsApiError` + domain/suppression client methods | Done |
+| Webhook `message.bounced` → Communication + case activity | Done |
+| Hard bounce → LiteDesk `EmailSuppression` + AMDS `createSuppression` | Done |
+| Agent IN_APP notification on failed/bounce | Done |
+| Send 422 (suppressed) / 403 (domain) user errors | Done |
+| Queue worker persists `metadata.sendErrorCode` (422/403 from AMDS) | Done |
+| `scheduled_at` passed on outbound AMDS send | Done |
+| Settings → AMDS sending domains (proxy `/v1/domains`) | Done |
+| Case email timeline delivery badges | Done |
+| E2E validation script | `LiteDesk/server/scripts/validate-amds-track3-bounce.js` |
+
+**Validate bounce flow:**
+
+```bash
+cd AMDS && npm run docker:up && npm run dev
+cd LiteDesk/server && npm run dev
+cd LiteDesk/server && node scripts/validate-amds-track3-bounce.js
+```
+
+See [LITEDESK-TRACK-3-DRAFT.md](./LITEDESK-TRACK-3-DRAFT.md) for implementation detail (LiteDesk repo copy: `LiteDesk/docs/LITEDESK-TRACK-3-DRAFT.md`).
 
 > **Note:** LiteDesk stores AMDS correlation on the **Communication** model (`metadata.amdsMessageId`, `status`) rather than directly on ticket `replies[]`. Sections 5.2–5.4 below show the original ticket-reply pattern; the implemented path uses Communication + Cases — see §7 checklist for the live wiring.
 
@@ -310,6 +358,7 @@ export const amdsClient = new AmdsClient(
 | `200 OK` | Duplicate `idempotency_key` for same tenant — returns existing `message_id` |
 | `400 Bad Request` | Validation error (see `details` in body) |
 | `401 Unauthorized` | Missing or invalid API key |
+| `429 Too Many Requests` | Per-tenant rate limit exceeded — retry with backoff (`Retry-After: 60`) |
 
 **Success body:**
 
@@ -345,9 +394,21 @@ export const amdsClient = new AmdsClient(
   },
   "created_at": "2026-06-29T10:00:00.000Z",
   "updated_at": "2026-06-29T10:00:05.000Z",
-  "delivered_at": "2026-06-29T10:00:05.000Z"
+  "delivered_at": "2026-06-29T10:00:05.000Z",
+  "events": [
+    { "event_type": "queued", "detail": { "queue": "transaction" }, "created_at": "2026-06-29T10:00:00.000Z" },
+    { "event_type": "processing", "detail": { "attempt": 1 }, "created_at": "2026-06-29T10:00:01.000Z" },
+    { "event_type": "delivery_attempt", "detail": { "attempt": 1 }, "created_at": "2026-06-29T10:00:01.000Z" },
+    { "event_type": "delivered", "detail": { "recipient": "user@example.com", "smtp_response": "250 2.0.0 OK" }, "created_at": "2026-06-29T10:00:05.000Z" },
+    { "event_type": "webhook_dispatched", "detail": { "event_id": "evt_..." }, "created_at": "2026-06-29T10:00:05.100Z" }
+  ],
+  "dead_letter": null
 }
 ```
+
+**Status values:** `queued` · `processing` · `delivered` · `failed` · `dead_letter`
+
+When `dead_letter` is non-null, the message will not be retried. Surface `failure_reason` to agents if `message.failed` webhook was missed.
 
 ### 3.7 Idempotency key format
 
@@ -380,6 +441,7 @@ Use the **reply document `_id`** (or a client-generated UUID stored on the reply
 | `202` / `200` | Success — store `message_id` |
 | `400` | Do not retry — fix payload, surface error to agent |
 | `401` | Do not retry — config/ops issue |
+| `429` | Rate limit — retry with exponential backoff (same as `5xx`) |
 | `5xx` / timeout | Retry up to 3 times with exponential backoff (1s, 2s, 4s) |
 
 Because AMDS deduplicates by `idempotency_key`, retries are safe.
@@ -488,14 +550,16 @@ After verification, parse JSON manually in the handler:
 const event = JSON.parse(req.body.toString('utf8'));
 ```
 
-### 4.4 Webhook event types (Phase 0a)
+### 4.4 Webhook event types
 
 | `event_type` | When | LiteDesk action |
 |--------------|------|-----------------|
 | `message.delivered` | SMTP accepted (250 OK) | Set `delivery_status: 'delivered'` |
-| `message.failed` | SMTP or worker error | Set `delivery_status: 'failed'`, notify agent |
+| `message.failed` | Permanent SMTP failure or dead letter | Set `delivery_status: 'failed'`, notify agent |
 
-Future phases will add `message.bounced`, `message.opened`, `message.clicked`, `message.complained`.
+**Track 2 note:** AMDS retries webhook POSTs to LiteDesk on failure (exponential backoff, up to `WEBHOOK_MAX_ATTEMPTS`). LiteDesk should still implement idempotency on `event_id` — retries may arrive after a delay.
+
+Future tracks will add `message.bounced`, `message.opened`, `message.clicked`, `message.complained`.
 
 ### 4.5 Event payload shape
 
@@ -900,7 +964,12 @@ Agent          LiteDesk API       MongoDB        AMDS Gateway     AMDS Worker   
 - [x] Replay same webhook `event_id` → idempotent (no double update)
 - [x] Stop LiteDesk briefly, send email, restart → poll `GET /api/communications/:id/delivery-status` recovers status
 
-### Manual webhook test (without waiting for AMDS)
+### AMDS Track 2 validation (AMDS repo)
+
+- [x] `npm run validate:track-2` passes (retry, DLQ, rate limits, events, webhook retry)
+- [ ] LiteDesk handles `429` from AMDS with backoff (optional — recommended for burst sends)
+
+See [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md).
 
 ```bash
 # Generate signature (Node REPL)
@@ -940,8 +1009,10 @@ curl -X POST http://localhost:3000/api/internal/webhooks/amds \
 | **TLS** | Use HTTPS even on private network (self-signed OK in Phase 0–1) |
 | **Secrets** | Rotate `AMDS_API_KEY` and `AMDS_WEBHOOK_SECRET` quarterly |
 | **Webhook URL** | Set AMDS `LITEDESK_WEBHOOK_URL` to LiteDesk private endpoint |
-| **From address** | Use org's verified support email once domain verification lands (Phase 2) |
+| **From address** | Use org's verified sending domain (Settings → Email → AMDS domains) |
 | **Monitoring** | Log AMDS errors; alert on high `delivery_status: failed` rate |
+| **Rate limits** | AMDS enforces per-tenant send limits (`429`); LiteDesk should backoff on burst sends |
+| **Webhook retries** | AMDS retries failed webhook delivery — handler must stay idempotent on `event_id` |
 
 ---
 
@@ -949,15 +1020,16 @@ curl -X POST http://localhost:3000/api/internal/webhooks/amds \
 
 Do not implement these until AMDS exposes the corresponding APIs/events:
 
-| Feature | AMDS phase |
-|---------|------------|
-| `message.bounced` / `message.complained` webhooks | Phase 2 |
-| Domain verification (SPF/DKIM/DMARC) | Phase 2 |
-| Campaign / marketing bulk send | Phase 3 |
-| Open/click tracking events | Phase 3 |
-| Template rendering via AMDS (`template_id`) | Phase 2+ |
+| Feature | AMDS phase | LiteDesk status |
+|---------|------------|-----------------|
+| `message.bounced` webhook | Track 3 | Done |
+| Domain verification (SPF/DKIM/DMARC) | Track 3 | Done |
+| `message.complained` webhook | Track 3+ | Not started |
+| Campaign / marketing bulk send | Track 4 | AMDS done — [LITEDESK-TRACK-4-DRAFT.md](./LITEDESK-TRACK-4-DRAFT.md) |
+| Open/click tracking events | Track 4 | AMDS done — [LITEDESK-TRACK-4-DRAFT.md](./LITEDESK-TRACK-4-DRAFT.md) |
+| Template rendering via AMDS (`template_id`) | Track 3+ | Not started |
 
-For Phase 0a–1, LiteDesk always sends pre-rendered `content.html` + `content.text`.
+LiteDesk always sends pre-rendered `content.html` + `content.text` (no AMDS-side template rendering yet).
 
 ---
 
@@ -971,8 +1043,13 @@ For Phase 0a–1, LiteDesk always sends pre-rendered `content.html` + `content.t
 | Communication model + AMDS metadata | `amdsMessageId`, delivery status | Done |
 | `sendCaseReplyEmail.js` | Cases / helpdesk outbound send | Done |
 | Settings → Integrations → Email | AMDS provider selection | Done |
-| Case timeline / threads UI | `deliveryStatus` display | Done |
+| Case timeline / threads UI | `deliveryStatus` + bounced badge | Done |
 | `GET /api/communications/:id/delivery-status` | Poll fallback when webhook delayed | Done |
+| `amds-errors.js` / `AmdsApiError` | Typed AMDS API errors (422/403/429) | Done |
+| `communicationEventHandler` | `delivered` / `failed` / `bounced` → Communication | Done |
+| `bounceContactHandler` + `bounceNotify` | Hard bounce → suppression + agent alert | Done |
+| Settings → Email → AMDS domains | Proxy `/v1/domains` CRUD + verify | Done |
+| `validate-amds-track3-bounce.js` | E2E bounce simulation test | Done |
 
 Reference implementations from the original spec (ticket `replies[]` pattern — not the primary LiteDesk path):
 

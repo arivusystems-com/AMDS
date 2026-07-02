@@ -1,17 +1,40 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { loadConfig, type WebhookEvent } from '@vmds/shared';
+import { Queue } from 'bullmq';
+import {
+  loadConfig,
+  WEBHOOK_QUEUE_NAME,
+  createLogger,
+  type WebhookEvent,
+  type WebhookJob,
+} from '@vmds/shared';
+import { getPool } from './db.js';
+import { recordMessageEvent } from './events.js';
 
-export async function sendWebhook(event: Omit<WebhookEvent, 'event_id' | 'timestamp'>): Promise<void> {
+const log = createLogger('worker');
+
+let webhookQueue: Queue<WebhookJob> | null = null;
+
+function getWebhookQueue(): Queue<WebhookJob> {
+  if (!webhookQueue) {
+    const config = loadConfig();
+    webhookQueue = new Queue<WebhookJob>(WEBHOOK_QUEUE_NAME, {
+      connection: { url: config.REDIS_URL },
+      defaultJobOptions: {
+        removeOnComplete: 500,
+        removeOnFail: 1000,
+        attempts: config.WEBHOOK_MAX_ATTEMPTS,
+        backoff: { type: 'exponential', delay: config.WEBHOOK_RETRY_DELAY_MS },
+      },
+    });
+  }
+  return webhookQueue;
+}
+
+async function postWebhook(payload: WebhookEvent): Promise<void> {
   const config = loadConfig();
   if (!config.LITEDESK_WEBHOOK_URL) {
     return;
   }
-
-  const payload: WebhookEvent = {
-    event_id: `evt_${randomUUID()}`,
-    timestamp: new Date().toISOString(),
-    ...event,
-  };
 
   const body = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -33,3 +56,158 @@ export async function sendWebhook(event: Omit<WebhookEvent, 'event_id' | 'timest
     throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
   }
 }
+
+export async function dispatchWebhook(
+  event: Omit<WebhookEvent, 'event_id' | 'timestamp'>
+): Promise<void> {
+  const config = loadConfig();
+  if (!config.LITEDESK_WEBHOOK_URL) {
+    return;
+  }
+
+  const pool = getPool();
+  const eventId = `evt_${randomUUID()}`;
+  const payload: WebhookEvent = {
+    event_id: eventId,
+    timestamp: new Date().toISOString(),
+    ...event,
+  };
+
+  const inserted = await pool.query(
+    `INSERT INTO webhook_outbox (event_id, message_id, event_type, payload)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (event_id) DO NOTHING
+     RETURNING id`,
+    [eventId, event.message_id, event.event_type, JSON.stringify(payload)]
+  );
+
+  if (inserted.rows.length === 0) {
+    return;
+  }
+
+  const outboxId = inserted.rows[0].id as string;
+
+  try {
+    await postWebhook(payload);
+    await pool.query(
+      `UPDATE webhook_outbox
+       SET status = 'delivered', delivered_at = NOW(), attempt_count = attempt_count + 1
+       WHERE id = $1`,
+      [outboxId]
+    );
+    await recordMessageEvent(pool, event.message_id, 'webhook_dispatched', {
+      event_id: eventId,
+    });
+    log.info('webhook delivered', {
+      message_id: event.message_id,
+      tenant_id: event.tenant_id,
+      event: 'webhook_dispatched',
+    });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown webhook error';
+    const delaySec = Math.ceil(config.WEBHOOK_RETRY_DELAY_MS / 1000);
+
+    await pool.query(
+      `UPDATE webhook_outbox
+       SET attempt_count = attempt_count + 1,
+           last_error = $2,
+           next_attempt_at = NOW() + ($3 || ' seconds')::interval
+       WHERE id = $1`,
+      [outboxId, errorMessage, String(delaySec)]
+    );
+
+    await getWebhookQueue().add(
+      'deliver',
+      {
+        outboxId,
+        eventId,
+        messageId: event.message_id,
+        tenantId: event.tenant_id,
+        eventType: event.event_type,
+        payload,
+        metadata: event.metadata,
+      },
+      { jobId: eventId, delay: config.WEBHOOK_RETRY_DELAY_MS }
+    );
+
+    await recordMessageEvent(pool, event.message_id, 'webhook_failed', {
+      event_id: eventId,
+      error: errorMessage,
+      will_retry: true,
+    });
+
+    log.warn('webhook failed, retry scheduled', {
+      message_id: event.message_id,
+      tenant_id: event.tenant_id,
+      event: 'webhook_failed',
+      error: errorMessage,
+    });
+  }
+}
+
+export async function deliverWebhookJob(job: import('bullmq').Job<WebhookJob>): Promise<void> {
+  const pool = getPool();
+
+  await postWebhook(job.data.payload);
+
+  await pool.query(
+    `UPDATE webhook_outbox
+     SET status = 'delivered', delivered_at = NOW(), attempt_count = attempt_count + 1
+     WHERE id = $1`,
+    [job.data.outboxId]
+  );
+
+  await recordMessageEvent(pool, job.data.messageId, 'webhook_dispatched', {
+    event_id: job.data.eventId,
+    retry: true,
+  });
+
+  log.info('webhook delivered on retry', {
+    message_id: job.data.messageId,
+    tenant_id: job.data.tenantId,
+    event: 'webhook_dispatched',
+  });
+}
+
+export async function markWebhookExhausted(
+  job: import('bullmq').Job<WebhookJob>,
+  reason: string
+): Promise<void> {
+  const pool = getPool();
+
+  await pool.query(
+    `UPDATE webhook_outbox
+     SET status = 'exhausted', last_error = $2
+     WHERE id = $1`,
+    [job.data.outboxId, reason]
+  );
+
+  await recordMessageEvent(pool, job.data.messageId, 'webhook_exhausted', {
+    event_id: job.data.eventId,
+    error: reason,
+  });
+
+  log.error('webhook retries exhausted', {
+    message_id: job.data.messageId,
+    tenant_id: job.data.tenantId,
+    event: 'webhook_exhausted',
+  });
+}
+
+export async function closeWebhookQueue(): Promise<void> {
+  if (!webhookQueue) {
+    return;
+  }
+
+  const activeQueue = webhookQueue;
+  webhookQueue = null;
+
+  await Promise.race([
+    activeQueue.close(),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 2_000);
+    }),
+  ]);
+}
+
+export { postWebhook };

@@ -2,7 +2,7 @@
 
 **Strategy:** Build and validate the full AMDS platform on localhost (Mailpit). Deploy to OCI **once** when all local exit gates pass. No third-party SMTP providers. No bouncing between local and cloud mid-build.
 
-**Related:** [AMDS-END-TO-END-ROADMAP.md](./AMDS-END-TO-END-ROADMAP.md) · [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [LITEDESK-INTEGRATION.md](./LITEDESK-INTEGRATION.md)
+**Related:** [AMDS-END-TO-END-ROADMAP.md](./AMDS-END-TO-END-ROADMAP.md) · [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md) · [LITEDESK-INTEGRATION.md](./LITEDESK-INTEGRATION.md)
 
 ---
 
@@ -40,7 +40,11 @@ cd ../LiteDesk && npm run dev
 
 # Automated check (gateway + worker must be running)
 npm run validate:phase-0a
+npm run validate:track-2
 ```
+
+For webhook retry coverage in `validate:track-2`, start the worker with  
+`LITEDESK_WEBHOOK_URL=http://localhost:3999/api/internal/webhooks/amds` (validation script starts a mock server on port 3999).
 
 **Mailpit UI:** http://localhost:8025
 
@@ -64,44 +68,44 @@ Phase 0a exit criteria met. See [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md).
 
 ---
 
-### Track 2 — Production delivery engine (local)
+### Track 2 — Production delivery engine ✅ Complete
 
-Build the real delivery path; test against Mailpit (same nodemailer transport, production code paths elsewhere).
+Build the real delivery path; test against Mailpit. See [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md).
 
 | Task | Deliverable | Status |
 |------|-------------|--------|
-| Direct SMTP transport module | MX lookup + connect (used on OCI; mockable in tests) | [ ] |
-| Retry queue | Soft failures → BullMQ retry with backoff | [ ] |
-| Dead letter handling | Failed after max attempts → DLQ table + status | [ ] |
-| Webhook delivery retries | Exponential backoff to LiteDesk (72h window) | [ ] |
-| Per-tenant rate limiting | Token bucket in Redis | [ ] |
-| Message events table | Append-only delivery attempts + events on `GET /v1/messages/:id` | [ ] |
-| Structured logging | JSON logs with `message_id`, `tenant_id` | [ ] |
-| Validation script | `npm run validate:track-2` | [ ] |
+| Direct SMTP transport module | MX lookup + connect (used on OCI; mockable in tests) | [x] |
+| Retry queue | Soft failures → BullMQ retry with backoff | [x] |
+| Dead letter handling | Failed after max attempts → DLQ table + status | [x] |
+| Webhook delivery retries | Exponential backoff to LiteDesk (72h window) | [x] |
+| Per-tenant rate limiting | Token bucket in Redis | [x] |
+| Message events table | Append-only delivery attempts + events on `GET /v1/messages/:id` | [x] |
+| Structured logging | JSON logs with `message_id`, `tenant_id` | [x] |
+| Validation script | `npm run validate:track-2` | [x] |
 
-**Local exit gate:** Retry and webhook-retry behavior proven in Mailpit; `validate:track-2` passes in CI.
+**Local exit gate:** Retry and webhook-retry behavior proven in Mailpit; `validate:track-2` passes in CI. **Complete.**
 
 ---
 
-### Track 3 — Domain auth, bounces, scheduling (local)
+### Track 3 — Domain auth, bounces, scheduling ✅ Complete
+
+See [TRACK-3-COMPLETE.md](./TRACK-3-COMPLETE.md).
 
 | Task | Deliverable | Status |
 |------|-------------|--------|
-| `POST /v1/domains` | Register sending domain per tenant | [ ] |
-| DNS record generation | SPF, DKIM, DMARC records returned to caller | [ ] |
-| `POST /v1/domains/:domain/verify` | DNS lookup validation | [ ] |
-| DKIM signing in worker | Sign outbound mail when domain verified | [ ] |
-| Suppression list API | `GET/POST/DELETE /v1/suppressions` | [ ] |
-| Scheduled queue | Honor `scheduled_at` on messages | [ ] |
-| Bounce parser | DSN classification (hard/soft) — unit tests + fixtures | [ ] |
-| Bounce simulation script | Inject `message.bounced` without inbound SMTP | [ ] |
-| Webhooks v2 | `message.bounced`, `message.complained` | [ ] |
-| LiteDesk bounce handling | Suppress contact, notify agent | [ ] |
-| Validation script | `npm run validate:track-3` | [ ] |
+| `POST /v1/domains` | Register sending domain per tenant | [x] |
+| DNS record generation | SPF, DKIM, DMARC records returned to caller | [x] |
+| `POST /v1/domains/:domain/verify` | DNS lookup validation | [x] |
+| DKIM signing in worker | Sign outbound mail when domain verified | [x] |
+| Suppression list API | `GET/POST/DELETE /v1/suppressions` | [x] |
+| Scheduled queue | Honor `scheduled_at` on messages | [x] |
+| Bounce parser | DSN classification (hard/soft) — unit tests + fixtures | [x] |
+| Bounce simulation script | Inject `message.bounced` without inbound SMTP | [x] |
+| Webhooks v2 | `message.bounced`, `message.complained` | [x] partial — bounced only |
+| LiteDesk bounce handling | Suppress contact, notify agent | [ ] LiteDesk repo |
+| Validation script | `npm run validate:track-3` | [x] |
 
-**Local exit gate:** Domain verify flow works against real DNS (if you control a test domain); bounce simulation updates LiteDesk; DKIM signs correctly (verify via parsed Mailpit MIME headers).
-
-**Note:** Live inbound bounce SMTP (port 25 ingress) is validated on OCI. Parser and webhook path are fully testable locally.
+**Local exit gate:** `validate:track-3` passes in CI. **Complete** (AMDS side).
 
 ---
 
@@ -109,15 +113,15 @@ Build the real delivery path; test against Mailpit (same nodemailer transport, p
 
 | Task | Deliverable | Status |
 |------|-------------|--------|
-| Campaign queue | Separate queue for bulk sends | [ ] |
-| Batch ingest API | `POST /v1/campaigns/:id/messages` | [ ] |
-| Open tracking | `GET /t/:token.png` pixel endpoint | [ ] |
-| Click tracking | `GET /c/:token` → 302 redirect | [ ] |
-| Webhooks | `message.opened`, `message.clicked` | [ ] |
-| Analytics API | `GET /v1/analytics/summary` | [ ] |
-| Worker concurrency tuning | Campaign vs transaction priority | [ ] |
+| Campaign queue | Separate queue for bulk sends | [x] |
+| Batch ingest API | `POST /v1/campaigns/:id/messages` | [x] |
+| Open tracking | `GET /t/:token.png` pixel endpoint | [x] |
+| Click tracking | `GET /c/:token` → 302 redirect | [x] |
+| Webhooks | `message.opened`, `message.clicked` | [x] |
+| Analytics API | `GET /v1/analytics/summary` | [x] |
+| Worker concurrency tuning | Campaign vs transaction priority | [x] |
 | LiteDesk Marketing integration | Campaign send + stats UI | [ ] |
-| Validation script | `npm run validate:track-4` | [ ] |
+| Validation script | `npm run validate:track-4` | [x] |
 
 **Local exit gate:** Batch send to Mailpit; open/click events fire webhooks to LiteDesk; analytics returns counts.
 
@@ -129,16 +133,18 @@ Build locally where possible; prove on OCI at deploy.
 
 | Task | Where | Status |
 |------|-------|--------|
-| Multi-worker processes | Local | [ ] |
-| Graceful shutdown | Local | [ ] |
-| Prometheus metrics endpoint | Local | [ ] |
-| Runbooks (incident, bounce spike) | Docs | [ ] |
-| Terraform / deploy scripts | Repo | [ ] |
+| Multi-worker processes | Local | [x] |
+| Graceful shutdown | Local | [x] |
+| Prometheus metrics endpoint | Local | [x] |
+| Runbooks (incident, bounce spike) | Docs | [x] |
+| Terraform / deploy scripts | Repo | [x] |
 | OCI VCN + compute + security lists | OCI | [ ] (prep during build) |
 | Port 25 unblock request | OCI support | [ ] (open early) |
 | PTR / reverse DNS | OCI | [ ] (at deploy) |
 | IP warm-up program | OCI | [ ] (post-deploy) |
 | Load balancer + gateway HA | OCI | [ ] (post-MVP) |
+
+See [TRACK-5-COMPLETE.md](./TRACK-5-COMPLETE.md) · [runbooks/](./runbooks/) · [deploy/](../deploy/)
 
 ---
 
@@ -151,9 +157,11 @@ npm run docker:up
 npm run db:migrate
 npm run dev          # separate terminal
 npm run validate:phase-0a
-# npm run validate:track-2   # when added
-# npm run validate:track-3   # when added
-# npm run validate:track-4   # when added
+npm run validate:track-2
+npm run validate:track-3   # DNS_VERIFY_BYPASS=true ENFORCE_DOMAIN_VERIFICATION=true on gateway
+npm run validate:track-4   # LITEDESK_WEBHOOK_URL=http://127.0.0.1:3997/... on gateway
+npm run validate:track-5
+npm run validate:track-6
 ```
 
 **LiteDesk manual E2E (local):**
@@ -226,10 +234,11 @@ Only after all track exit gates pass.
 
 ## Implementation order (recommended)
 
-1. **Track 2** — retry queue, webhook retries, rate limits, message events
-2. **Track 3** — domains, DKIM, suppressions, scheduled send, bounce simulation
-3. **Track 4** — campaigns, tracking, analytics
-4. **Track 5 prep** — Terraform, port-25 ticket, runbooks
+1. ~~**Track 2** — retry queue, webhook retries, rate limits, message events~~ ✅
+1. ~~**Track 3** — domains, DKIM, suppressions, scheduled send, bounce simulation~~ ✅
+2. ~~**Track 3** — domains, DKIM, suppressions, scheduled send, bounce simulation~~ ✅
+3. ~~**Track 4** — campaigns, tracking, analytics~~ ✅ (AMDS side)
+4. ~~**Track 5 prep** — metrics, multi-worker, runbooks, Terraform~~ ✅ (local)
 5. **OCI deploy** — single cutover + real inbox smoke test
 
 ---

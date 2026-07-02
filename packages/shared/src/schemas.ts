@@ -23,6 +23,13 @@ export const sendMessageSchema = z.object({
     }),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
+  scheduled_at: z.string().datetime().optional(),
+  tracking: z
+    .object({
+      opens: z.boolean().default(false),
+      clicks: z.boolean().default(false),
+    })
+    .optional(),
 });
 
 export type SendMessageRequest = z.infer<typeof sendMessageSchema>;

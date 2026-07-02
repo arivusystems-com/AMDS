@@ -1,0 +1,20 @@
+[Unit]
+Description=AMDS Worker instance %i
+After=network.target postgresql.service redis.service amds-gateway.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=amds
+WorkingDirectory=/opt/amds
+EnvironmentFile=/opt/amds/.env
+Environment=NODE_ENV=production
+Environment=WORKER_INSTANCE_ID=%i
+ExecStart=/usr/bin/node services/worker/dist/index.js
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

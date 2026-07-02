@@ -1,0 +1,81 @@
+# AMDS production stack (gateway + scalable workers)
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml up -d --scale worker=2
+#
+# Requires: npm run build before first start (images use dist/).
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.gateway
+    container_name: amds-gateway
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      SHUTDOWN_GRACE_MS: 25000
+    ports:
+      - "${AMDS_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.worker
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      SHUTDOWN_GRACE_MS: 25000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Scale: docker compose -f docker-compose.prod.yml up -d --scale worker=2
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: amds
+      POSTGRES_PASSWORD: amds
+      POSTGRES_DB: amds
+    volumes:
+      - amds_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amds -d amds"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - amds_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["local-smtp"]
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  amds_postgres_data:
+  amds_redis_data:

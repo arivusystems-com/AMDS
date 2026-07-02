@@ -59,22 +59,31 @@ curl -X POST http://localhost:8080/v1/messages \
 
 Open **Mailpit** to see the email: [http://localhost:8025](http://localhost:8025)
 
-### 5. Check message status
+### 5. Check message status (includes events timeline)
 
 ```bash
 curl http://localhost:8080/v1/messages/<message_id> \
   -H "Authorization: Bearer amds_dev_key"
 ```
 
-### 6. Validate Phase 0a (automated)
+Response includes `events[]` (delivery timeline) and `dead_letter` (if applicable). See [docs/TRACK-2-COMPLETE.md](docs/TRACK-2-COMPLETE.md).
+
+### 6. Validate (automated)
 
 With gateway + worker running:
 
 ```bash
-npm run validate:phase-0a
+npm run validate:phase-0a    # Track 1 regression
+npm run validate:track-2     # Track 2 — retry, DLQ, rate limits, events
 ```
 
-See [docs/PHASE-0A-COMPLETE.md](docs/PHASE-0A-COMPLETE.md) for exit criteria and LiteDesk E2E steps.
+For the full Track 2 suite (webhook retry test), start the worker with:
+
+```bash
+LITEDESK_WEBHOOK_URL=http://localhost:3999/api/internal/webhooks/amds npm run dev
+```
+
+See [docs/PHASE-0A-COMPLETE.md](docs/PHASE-0A-COMPLETE.md) and [docs/TRACK-2-COMPLETE.md](docs/TRACK-2-COMPLETE.md).
 
 ## Stop all services
 
@@ -118,7 +127,8 @@ VMDS/
 ├── packages/shared/     # Config, types, validation schemas
 ├── services/gateway/    # Fastify API — POST /v1/messages
 ├── services/worker/     # Queue consumer — SMTP → Mailpit
-├── migrations/          # PostgreSQL schema
+├── migrations/          # PostgreSQL schema (001, 002, …)
+├── scripts/             # migrate, validate-phase-0a, validate-track-2
 ├── docker-compose.yml   # Postgres, Redis, Mailpit
 └── docs/                # Architecture & roadmap
 ```
@@ -127,17 +137,20 @@ VMDS/
 
 | Phase | Where | SMTP |
 |-------|-------|------|
-| **Tracks 1–4** (current) | Localhost | Mailpit — no real inbox |
+| **Tracks 1–3** ✅ | Localhost | Mailpit |
+| **Track 4** (current) | Localhost | Mailpit |
 | **Deploy** (final) | OCI | Direct MX delivery (port 25) |
 
-Track 1 (core pipeline) is complete. Next: **Track 2** — retry queue, webhook retries, rate limits. Progress: [docs/BUILD-TO-DEPLOY.md](docs/BUILD-TO-DEPLOY.md).
+Tracks 1–4 complete on AMDS. **Track 5** (metrics, multi-worker, deploy prep) complete — see [docs/TRACK-5-COMPLETE.md](docs/TRACK-5-COMPLETE.md). **Next:** OCI deploy. See [docs/BUILD-TO-DEPLOY.md](docs/BUILD-TO-DEPLOY.md) · [deploy/README.md](deploy/README.md).
 
 ## LiteDesk integration
 
-Phase 0a is **complete** on both AMDS and LiteDesk. See:
+Tracks 1–3 are **complete** on both AMDS and LiteDesk (domain auth, bounces, suppressions, scheduling). Track 2 required no LiteDesk changes; Track 3 adds bounce handling, domain settings, and delivery badges. See:
 
 - [docs/LITEDESK-INTEGRATION.md](docs/LITEDESK-INTEGRATION.md) — API contract, webhooks, implementation status
+- [docs/TRACK-3-COMPLETE.md](docs/TRACK-3-COMPLETE.md) — Track 3 exit criteria (AMDS + LiteDesk)
 - [docs/PHASE-0A-COMPLETE.md](docs/PHASE-0A-COMPLETE.md) — Track 1 exit criteria
+- [docs/TRACK-2-COMPLETE.md](docs/TRACK-2-COMPLETE.md) — Track 2 exit criteria
 
 Point LiteDesk at `AMDS_BASE_URL=http://localhost:8080` and matching `AMDS_API_KEY` / `AMDS_WEBHOOK_SECRET`.
 
@@ -151,6 +164,9 @@ Point LiteDesk at `AMDS_BASE_URL=http://localhost:8080` and matching `AMDS_API_K
 | `npm run db:migrate` | Apply database migrations |
 | `npm run build` | Build all packages |
 | `npm run validate:phase-0a` | Run Phase 0a exit validation (gateway + worker must be up) |
+| `npm run validate:track-2` | Run Track 2 validation (retry, DLQ, rate limits, events) |
+| `npm run validate:track-3` | Run Track 3 validation (domains, DKIM, suppressions, bounces) |
+| `npm run simulate:bounce` | Simulate bounce for a message (`<message_id> <tenant_id> hard\|soft`) |
 
 **Stop everything:** `Ctrl+C` (Node) then `npm run docker:down` (Docker).
 

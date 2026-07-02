@@ -9,13 +9,25 @@
     "services/*"
   ],
   "scripts": {
-    "predev:gateway": "npm run build -w @vmds/shared",
-    "predev:worker": "npm run build -w @vmds/shared",
-    "dev": "concurrently -n gateway,worker -c blue,green \"npm run dev:gateway\" \"npm run dev:worker\"",
-    "dev:gateway": "npm run dev -w @vmds/gateway",
-    "dev:worker": "npm run dev -w @vmds/worker",
+    "predev": "npm run build -w @vmds/shared",
+    "dev": "concurrently -k -n gateway,worker -c blue,green \"tsx watch services/gateway/src/index.ts\" \"tsx watch services/worker/src/index.ts\"",
+    "dev:gateway": "tsx watch services/gateway/src/index.ts",
+    "dev:worker": "tsx watch services/worker/src/index.ts",
     "build": "npm run build -w @vmds/shared && npm run build -w @vmds/gateway && npm run build -w @vmds/worker",
     "validate:phase-0a": "node scripts/validate-phase-0a.js",
+    "validate:track-2": "node scripts/validate-track-2.js",
+    "validate:track-3": "node scripts/validate-track-3.js",
+    "validate:track-4": "node scripts/validate-track-4.js",
+    "validate:track-5": "node scripts/validate-track-5.js",
+    "validate:track-6a": "node scripts/validate-track-6a.js",
+    "validate:track-6b": "node scripts/validate-track-6b.js",
+    "validate:track-6c": "node scripts/validate-track-6c.js",
+    "validate:track-6d": "node scripts/validate-track-6d.js",
+    "validate:track-6e": "node scripts/validate-track-6e.js",
+    "validate:track-6f": "node scripts/validate-track-6f.js",
+    "validate:track-6": "npm run validate:track-6a && npm run validate:track-6b && npm run validate:track-6c && npm run validate:track-6d && npm run validate:track-6e && npm run validate:track-6f",
+    "simulate:complaint": "node scripts/simulate-complaint.js",
+    "simulate:bounce": "node scripts/simulate-bounce.js",
     "db:migrate": "node scripts/migrate.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -24,7 +36,8 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "dotenv": "^16.4.7",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2"
   },
   "engines": {
     "node": ">=20"
