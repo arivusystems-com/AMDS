@@ -89,4 +89,69 @@ export async function trackingRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.redirect(hit.targetUrl, 302);
   });
+
+  async function handleUnsubscribe(
+    messageId: string,
+    reply: import('fastify').FastifyReply
+  ) {
+    const pool = getPool();
+    const msg = await pool.query(
+      `SELECT id, tenant_id, to_addresses, metadata FROM messages WHERE id = $1`,
+      [messageId]
+    );
+    if (msg.rows.length === 0) {
+      return reply.code(404).type('text/html').send('<h1>Not found</h1>');
+    }
+
+    const row = msg.rows[0];
+    const recipients = row.to_addresses as Array<{ email: string }>;
+    const recipient = recipients[0]?.email;
+    if (!recipient) {
+      return reply.code(400).type('text/html').send('<h1>No recipient</h1>');
+    }
+
+    await pool.query(
+      `INSERT INTO suppressions (tenant_id, email, reason, source_message_id)
+       VALUES ($1, $2, 'unsubscribe', $3)
+       ON CONFLICT (tenant_id, email) DO UPDATE SET
+         reason = EXCLUDED.reason,
+         source_message_id = EXCLUDED.source_message_id`,
+      [row.tenant_id, recipient.toLowerCase(), messageId]
+    );
+
+    await recordMessageEvent(pool, messageId, 'unsubscribed', { recipient });
+
+    void recordReputationSignal(pool, {
+      tenantId: row.tenant_id as string,
+      messageId,
+      signalType: 'unsubscribe',
+      detail: { recipient },
+    });
+
+    try {
+      await dispatchWebhook({
+        event_type: 'message.unsubscribed',
+        tenant_id: row.tenant_id as string,
+        message_id: messageId,
+        metadata: (row.metadata as Record<string, unknown>) ?? undefined,
+        engagement: { recipient, hit_count: 1 },
+      });
+    } catch {
+      // best-effort
+    }
+
+    return reply
+      .type('text/html')
+      .send(
+        '<!doctype html><html><body style="font-family:system-ui;padding:2rem"><h1>Unsubscribed</h1><p>You will no longer receive marketing email from this sender via AMDS.</p></body></html>'
+      );
+  }
+
+  app.get<{ Params: { messageId: string } }>('/u/:messageId', async (request, reply) => {
+    return handleUnsubscribe(request.params.messageId, reply);
+  });
+
+  app.post<{ Params: { messageId: string } }>('/u/:messageId', async (request, reply) => {
+    return handleUnsubscribe(request.params.messageId, reply);
+  });
 }

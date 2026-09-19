@@ -276,7 +276,12 @@ export async function recordReputationSignal(
   }
 
   if (input.signalType === 'blacklist' || input.signalType === 'spam_trap') {
-    return applyNegativeReputationSignal(pool, input);
+    return applyNegativeReputationSignal(pool, {
+      tenantId: input.tenantId,
+      messageId: input.messageId,
+      signalType: input.signalType,
+      detail: input.detail,
+    });
   }
 
   await pool.query(

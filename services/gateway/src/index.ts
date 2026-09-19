@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { loadConfig } from '@vmds/shared';
 import { createAuthHook } from './lib/auth.js';
 import { closePool } from './lib/db.js';
@@ -19,6 +20,7 @@ import { trackingRoutes } from './routes/tracking.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { openapiRoutes } from './routes/openapi.js';
+import { opsRoutes } from './routes/ops.js';
 import {
   httpRequestDuration,
   httpRequestsTotal,
@@ -108,9 +110,11 @@ app = Fastify({
   },
 });
 
-app.addHook('onRequest', createAuthHook());
+const gateway = app;
 
-app.addHook('onResponse', async (request, reply) => {
+gateway.addHook('onRequest', createAuthHook());
+
+gateway.addHook('onResponse', async (request: FastifyRequest, reply: FastifyReply) => {
   const config = loadConfig();
   if (!config.METRICS_ENABLED) {
     return;
@@ -123,24 +127,25 @@ app.addHook('onResponse', async (request, reply) => {
   httpRequestDuration.observe({ method: request.method, route }, elapsed);
 });
 
-await healthRoutes(app);
-await messageRoutes(app);
-await domainRoutes(app);
-await suppressionRoutes(app);
-await adminRoutes(app);
-await campaignRoutes(app);
-await tenantRoutes(app);
-await reputationRoutes(app);
-await throughputRoutes(app);
-await trackingRoutes(app);
-await analyticsRoutes(app);
-await metricsRoutes(app);
-await openapiRoutes(app);
+await healthRoutes(gateway);
+await messageRoutes(gateway);
+await domainRoutes(gateway);
+await suppressionRoutes(gateway);
+await adminRoutes(gateway);
+await campaignRoutes(gateway);
+await tenantRoutes(gateway);
+await reputationRoutes(gateway);
+await throughputRoutes(gateway);
+await trackingRoutes(gateway);
+await analyticsRoutes(gateway);
+await metricsRoutes(gateway);
+await openapiRoutes(gateway);
+await opsRoutes(gateway);
 
 try {
-  await app.listen({ port: config.AMDS_PORT, host: '0.0.0.0' });
-  app.log.info(`AMDS Gateway listening on http://localhost:${config.AMDS_PORT}`);
+  await gateway.listen({ port: config.AMDS_PORT, host: '0.0.0.0' });
+  gateway.log.info(`AMDS Gateway listening on http://localhost:${config.AMDS_PORT}`);
 } catch (err) {
-  app.log.error(err);
+  gateway.log.error(err);
   process.exit(1);
 }

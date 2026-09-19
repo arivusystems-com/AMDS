@@ -5,6 +5,7 @@ export type ReputationSignalType =
   | 'complaint'
   | 'open'
   | 'click'
+  | 'unsubscribe'
   | 'blacklist'
   | 'spam_trap';
 

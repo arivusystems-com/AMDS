@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/public && cp -f public/ops.html dist/public/ops.html",
     "start": "node dist/index.js"
   },
   "dependencies": {

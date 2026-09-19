@@ -10,7 +10,15 @@ export const tenantPolicySchema = z.object({
   max_campaign_size: z.coerce.number().int().min(0).default(0),
   warmup_enabled: z.boolean().default(true),
   reputation_enabled: z.boolean().default(true),
-  ip_pool: z.enum(['transaction', 'marketing']).optional(),
+  ip_pool: z
+    .enum([
+      'transaction',
+      'marketing',
+      'marketing_healthy',
+      'marketing_standard',
+      'marketing_restricted',
+    ])
+    .optional(),
 });
 
 export type TenantPolicyInput = z.infer<typeof tenantPolicySchema>;
@@ -18,7 +26,16 @@ export type TenantPolicyInput = z.infer<typeof tenantPolicySchema>;
 export const tenantPolicyResponseSchema = tenantPolicySchema.extend({
   tenant_id: z.string(),
   credits_reserved: z.number().int().min(0),
-  ip_pool: z.enum(['transaction', 'marketing']).nullable().optional(),
+  ip_pool: z
+    .enum([
+      'transaction',
+      'marketing',
+      'marketing_healthy',
+      'marketing_standard',
+      'marketing_restricted',
+    ])
+    .nullable()
+    .optional(),
   first_send_at: z.string().nullable(),
   synced_at: z.string(),
   created_at: z.string(),

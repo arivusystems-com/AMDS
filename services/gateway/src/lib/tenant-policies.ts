@@ -13,7 +13,13 @@ export interface TenantPolicyRow {
   max_campaign_size: number;
   warmup_enabled: boolean;
   reputation_enabled: boolean;
-  ip_pool: 'transaction' | 'marketing' | null;
+  ip_pool:
+    | 'transaction'
+    | 'marketing'
+    | 'marketing_healthy'
+    | 'marketing_standard'
+    | 'marketing_restricted'
+    | null;
   first_send_at: Date | null;
   synced_at: Date;
   created_at: Date;
@@ -33,7 +39,7 @@ function mapPolicyRow(row: Record<string, unknown>): TenantPolicyRow {
     max_campaign_size: Number(row.max_campaign_size),
     warmup_enabled: Boolean(row.warmup_enabled),
     reputation_enabled: Boolean(row.reputation_enabled),
-    ip_pool: (row.ip_pool as 'transaction' | 'marketing' | null) ?? null,
+    ip_pool: (row.ip_pool as TenantPolicyRow['ip_pool']) ?? null,
     first_send_at: row.first_send_at ? new Date(row.first_send_at as string) : null,
     synced_at: new Date(row.synced_at as string),
     created_at: new Date(row.created_at as string),

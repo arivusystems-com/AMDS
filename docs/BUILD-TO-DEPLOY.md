@@ -2,6 +2,8 @@
 
 **Strategy:** Build and validate the full AMDS platform on localhost (Mailpit). Deploy to OCI **once** when all local exit gates pass. No third-party SMTP providers. No bouncing between local and cloud mid-build.
 
+**Full OCI deploy (networking, multi-IP, DNS, systemd, smoke tests):** [OCI-DEPLOY-END-TO-END.md](./OCI-DEPLOY-END-TO-END.md)
+
 **Related:** [AMDS-END-TO-END-ROADMAP.md](./AMDS-END-TO-END-ROADMAP.md) · [PHASE-0A-COMPLETE.md](./PHASE-0A-COMPLETE.md) · [TRACK-2-COMPLETE.md](./TRACK-2-COMPLETE.md) · [LITEDESK-INTEGRATION.md](./LITEDESK-INTEGRATION.md)
 
 ---

@@ -5,6 +5,10 @@ import {
   loadConfig,
   createLogger,
   CAMPAIGN_QUEUE_NAME,
+  attributeFailureClass,
+  shouldAffectInfraPressure,
+  shouldAffectTenantReputation,
+  bounceSignalForFailure,
   type SendMessageJob,
 } from '@vmds/shared';
 import { getPool } from './lib/db.js';
@@ -19,9 +23,14 @@ import { consumeCredit, releaseCredit } from './lib/credits.js';
 import { recordReputationSignal } from './lib/reputation-engine.js';
 import { getEffectiveHourlyRate } from './lib/throughput-engine.js';
 import { acquireDeliverySlot } from './lib/throughput-pacing.js';
-import { resolveEgressIpForSend } from './lib/ip-pools.js';
+import { resolveEgressIpForSend, assertEgressBindable } from './lib/ip-pools.js';
 import { checkEgressCap, recordEgressSend } from './lib/egress-ip.js';
 import { recordSmtpOutcome } from './lib/infra-state.js';
+import {
+  resolveLayeredHourlyRate,
+  acquireProviderSlot,
+  acquirePoolSlot,
+} from './lib/layered-limits.js';
 
 const log = createLogger('worker');
 
@@ -57,17 +66,58 @@ function applyTestSimulation(
 export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
   const { messageId, tenantId, from, to, subject, html, text, metadata } = job.data;
   const pool = getPool();
+  const config = loadConfig();
   const attempt = job.attemptsMade + 1;
   const queueType = deliveryQueueLabel(job);
+  const primaryRecipient = to[0].email;
 
-  const effectiveHourly = await getEffectiveHourlyRate(pool, tenantId, queueType);
-  const slot = await acquireDeliverySlot(tenantId, effectiveHourly);
+  const egress = await resolveEgressIpForSend(pool, tenantId, queueType);
+
+  try {
+    assertEgressBindable(egress.egress_ip, config.EGRESS_BIND_REQUIRED);
+  } catch (bindErr) {
+    const msg = bindErr instanceof Error ? bindErr.message : 'Egress bind failure';
+    await pool.query(
+      `UPDATE messages
+       SET status = 'failed', error_message = $2, failure_class = 'infra',
+           egress_ip = $3, ip_pool_id = $4, updated_at = NOW()
+       WHERE id = $1`,
+      [messageId, msg, egress.egress_ip, egress.pool_id]
+    );
+    await recordMessageEvent(pool, messageId, 'failed', {
+      error: msg,
+      failure_class: 'infra',
+      attempt,
+    });
+    void recordSmtpOutcome(false);
+    throw new RetryableSmtpError(msg);
+  }
+
+  const tenantEffective = await getEffectiveHourlyRate(pool, tenantId, queueType);
+  const layered = await resolveLayeredHourlyRate({
+    tenantEffectiveHourly: tenantEffective,
+    poolHourlyLimit: egress.hourly_send_limit,
+    recipientEmail: primaryRecipient,
+  });
+
+  const slot = await acquireDeliverySlot(tenantId, layered.hourly);
   if (!slot.allowed) {
     await job.moveToDelayed(Date.now() + slot.retryAfterMs, job.token);
     throw new DelayedError('Throughput pacing');
   }
 
-  const egress = await resolveEgressIpForSend(pool, tenantId, queueType);
+  const poolSlot = await acquirePoolSlot(egress.pool_id, egress.hourly_send_limit);
+  if (!poolSlot.allowed) {
+    await job.moveToDelayed(Date.now() + poolSlot.retryAfterMs, job.token);
+    throw new DelayedError('Pool hourly limit');
+  }
+
+  const providerSlot = await acquireProviderSlot(layered.provider, layered.providerLimit);
+  if (!providerSlot.allowed) {
+    await job.moveToDelayed(Date.now() + providerSlot.retryAfterMs, job.token);
+    throw new DelayedError('Provider hourly limit');
+  }
+
   const cap = await checkEgressCap(pool, egress.egress_ip);
   if (!cap.allowed) {
     await job.moveToDelayed(Date.now() + cap.retry_after_ms, job.token);
@@ -108,26 +158,42 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
 
   await pool.query(
     `UPDATE messages
-     SET status = 'processing', attempt_count = $2, updated_at = NOW()
+     SET status = 'processing', attempt_count = $2,
+         egress_ip = $3, ip_pool_id = $4, updated_at = NOW()
      WHERE id = $1`,
-    [messageId, attempt]
+    [messageId, attempt, egress.egress_ip, egress.pool_id]
   );
 
-  await recordMessageEvent(pool, messageId, 'processing', { attempt });
-  await recordMessageEvent(pool, messageId, 'delivery_attempt', { attempt });
-
-  const primaryRecipient = to[0].email;
+  await recordMessageEvent(pool, messageId, 'processing', {
+    attempt,
+    pool_id: egress.pool_id,
+    egress_ip: egress.egress_ip,
+    risk_tier: egress.risk_tier,
+    source: egress.source,
+  });
+  await recordMessageEvent(pool, messageId, 'delivery_attempt', {
+    attempt,
+    pool_id: egress.pool_id,
+    egress_ip: egress.egress_ip,
+  });
 
   log.info('processing send job', {
     message_id: messageId,
     tenant_id: tenantId,
     event: 'delivery_attempt',
     attempt,
+    pool_id: egress.pool_id,
+    egress_ip: egress.egress_ip,
   });
 
   try {
     const dkim = await getDkimForSender(pool, tenantId, from.email);
     const trackedHtml = await applyTrackingToHtml(pool, messageId, html);
+    const listUnsubscribeUrl =
+      queueType === 'campaign'
+        ? `${config.TRACKING_BASE_URL}/u/${messageId}`
+        : undefined;
+
     const info = await sendMail({
       from,
       to,
@@ -135,6 +201,8 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
       html: trackedHtml,
       text,
       dkim: dkim ?? undefined,
+      localAddress: egress.egress_ip,
+      listUnsubscribeUrl,
     });
     const smtpResponse = info.response;
 
@@ -149,6 +217,8 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
       recipient: primaryRecipient,
       smtp_response: smtpResponse,
       attempt,
+      pool_id: egress.pool_id,
+      egress_ip: egress.egress_ip,
     });
 
     await consumeCredit(pool, tenantId, messageId);
@@ -201,11 +271,15 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
       err instanceof UnrecoverableError ||
       classified instanceof PermanentSmtpError;
 
+    const failureClass = attributeFailureClass(err);
+    const affectInfra = shouldAffectInfraPressure(failureClass);
+    const bounceSignal = bounceSignalForFailure(failureClass, isPermanent);
+
     await pool.query(
       `UPDATE messages
-       SET status = $2, error_message = $3, updated_at = NOW()
+       SET status = $2, error_message = $3, failure_class = $4, updated_at = NOW()
        WHERE id = $1`,
-      [messageId, isPermanent ? 'failed' : 'processing', errorMessage]
+      [messageId, isPermanent ? 'failed' : 'processing', errorMessage, failureClass]
     );
 
     await recordMessageEvent(pool, messageId, 'failed', {
@@ -213,11 +287,23 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
       error: errorMessage,
       attempt,
       retryable: !isPermanent,
+      failure_class: failureClass,
     });
+
+    if (bounceSignal && shouldAffectTenantReputation(failureClass)) {
+      void recordReputationSignal(pool, {
+        tenantId,
+        messageId,
+        signalType: bounceSignal,
+        detail: { failure_class: failureClass, error: errorMessage },
+      });
+    }
 
     if (isPermanent) {
       recordDelivery(deliveryQueueLabel(job), 'failure');
-      void recordSmtpOutcome(false);
+      if (affectInfra) {
+        void recordSmtpOutcome(false);
+      }
       await releaseCredit(pool, tenantId, messageId);
       await moveToDeadLetter(pool, job, errorMessage);
       try {
@@ -244,10 +330,13 @@ export async function processSendJob(job: Job<SendMessageJob>): Promise<void> {
       event: 'failed',
       attempt,
       retryable: !isPermanent,
+      failure_class: failureClass,
       error: errorMessage,
     });
 
-    void recordSmtpOutcome(false);
+    if (affectInfra) {
+      void recordSmtpOutcome(false);
+    }
 
     throw err instanceof Error ? err : new Error(errorMessage);
   }

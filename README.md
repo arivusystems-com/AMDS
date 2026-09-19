@@ -125,13 +125,18 @@ You will need `npm run db:migrate` again after wiping volumes.
 ```
 VMDS/
 ├── packages/shared/     # Config, types, validation schemas
-├── services/gateway/    # Fastify API — POST /v1/messages
-├── services/worker/     # Queue consumer — SMTP → Mailpit
-├── migrations/          # PostgreSQL schema (001, 002, …)
-├── scripts/             # migrate, validate-phase-0a, validate-track-2
+├── services/gateway/    # Fastify API — POST /v1/messages + Ops UI `/ops`
+├── services/worker/     # Queue consumer — SMTP → Mailpit / direct MX
+├── migrations/          # PostgreSQL schema (001…010 delivery isolation)
+├── scripts/             # migrate, validate-*, simulate-*
 ├── docker-compose.yml   # Postgres, Redis, Mailpit
 └── docs/                # Architecture & roadmap
 ```
+
+## Ops UI
+
+With gateway running: [http://localhost:8080/ops](http://localhost:8080/ops)  
+Paste `AMDS_API_KEY` in the page. See [docs/IP-POOL-ISOLATION.md](docs/IP-POOL-ISOLATION.md).
 
 ## Development strategy (Option A)
 
@@ -141,7 +146,7 @@ VMDS/
 | **Track 4** (current) | Localhost | Mailpit |
 | **Deploy** (final) | OCI | Direct MX delivery (port 25) |
 
-Tracks 1–4 complete on AMDS. **Track 5** (metrics, multi-worker, deploy prep) complete — see [docs/TRACK-5-COMPLETE.md](docs/TRACK-5-COMPLETE.md). **Next:** OCI deploy. See [docs/BUILD-TO-DEPLOY.md](docs/BUILD-TO-DEPLOY.md) · [deploy/README.md](deploy/README.md).
+Tracks 1–4 complete on AMDS. **Track 5** (metrics, multi-worker, deploy prep) complete — see [docs/TRACK-5-COMPLETE.md](docs/TRACK-5-COMPLETE.md). **Delivery isolation** (reputation→IP pools) — see [docs/IP-POOL-ISOLATION.md](docs/IP-POOL-ISOLATION.md). **OCI production deploy (end-to-end):** [docs/OCI-DEPLOY-END-TO-END.md](docs/OCI-DEPLOY-END-TO-END.md). Also [docs/BUILD-TO-DEPLOY.md](docs/BUILD-TO-DEPLOY.md) · [deploy/README.md](deploy/README.md).
 
 ## LiteDesk integration
 
@@ -163,6 +168,7 @@ Point LiteDesk at `AMDS_BASE_URL=http://localhost:8080` and matching `AMDS_API_K
 | `npm run docker:down` | Stop Docker services (Postgres, Redis, Mailpit) |
 | `npm run db:migrate` | Apply database migrations |
 | `npm run build` | Build all packages |
+| `npm run validate:isolation` | Reputation→pool routing, inventory, ops UI |
 | `npm run validate:phase-0a` | Run Phase 0a exit validation (gateway + worker must be up) |
 | `npm run validate:track-2` | Run Track 2 validation (retry, DLQ, rate limits, events) |
 | `npm run validate:track-3` | Run Track 3 validation (domains, DKIM, suppressions, bounces) |

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMDS Ops</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --bad: #f07178;
+      --border: #2a3548;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1b2a44, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; letter-spacing: 0.04em; }
+    header .sub { color: var(--muted); font-size: 0.85rem; }
+    main { padding: 1.25rem 1.5rem 3rem; display: grid; gap: 1rem; }
+    .row { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .card h2 { margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input {
+      width: 100%;
+      background: #0d121a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.55rem 0.7rem;
+      margin-bottom: 0.6rem;
+    }
+    button {
+      background: var(--accent);
+      color: #041018;
+      border: 0;
+      border-radius: 6px;
+      padding: 0.55rem 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    pre {
+      background: #0d121a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      overflow: auto;
+      max-height: 360px;
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+    .pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; margin-right: 0.35rem; }
+    .ok { background: rgba(62,207,142,.15); color: var(--ok); }
+    .warn { background: rgba(240,180,41,.15); color: var(--warn); }
+    .bad { background: rgba(240,113,120,.15); color: var(--bad); }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .err { color: var(--bad); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AMDS Ops</h1>
+      <div class="sub">Internal delivery control plane — pools, infra, tenant routing</div>
+    </div>
+    <div class="actions" style="margin-left:auto">
+      <button class="secondary" id="refreshAll">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <div class="row">
+      <section class="card">
+        <h2>Auth</h2>
+        <label>API key (Bearer)</label>
+        <input id="apiKey" type="password" placeholder="amds_dev_key" />
+        <div class="actions">
+          <button id="saveKey">Save key</button>
+        </div>
+        <p class="sub" style="margin-top:0.75rem;color:var(--muted);font-size:0.8rem">Stored in this browser only. Same key as AMDS_API_KEY.</p>
+      </section>
+      <section class="card">
+        <h2>Health</h2>
+        <div id="healthPills"></div>
+        <pre id="healthOut">Loading…</pre>
+      </section>
+      <section class="card">
+        <h2>Infra</h2>
+        <pre id="infraOut">Loading…</pre>
+      </section>
+    </div>
+    <div class="row">
+      <section class="card">
+        <h2>IP pools</h2>
+        <pre id="poolsOut">Loading…</pre>
+      </section>
+      <section class="card">
+        <h2>IP inventory</h2>
+        <pre id="invOut">Loading…</pre>
+      </section>
+    </div>
+    <section class="card">
+      <h2>Tenant routing inspector</h2>
+      <label>Tenant ID</label>
+      <input id="tenantId" placeholder="org_acme" />
+      <div class="actions">
+        <button id="lookupTenant">Lookup routing</button>
+      </div>
+      <pre id="tenantOut" style="margin-top:0.75rem">Enter a tenant_id</pre>
+    </section>
+    <section class="card">
+      <h2>Message inspector</h2>
+      <label>Message ID</label>
+      <input id="messageId" placeholder="uuid" />
+      <div class="actions">
+        <button id="lookupMsg">Lookup message</button>
+      </div>
+      <pre id="msgOut" style="margin-top:0.75rem">Enter a message_id</pre>
+    </section>
+    <p id="err" class="err"></p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const keyStore = 'amds_ops_api_key';
+    $('apiKey').value = localStorage.getItem(keyStore) || '';
+
+    function apiKey() {
+      return $('apiKey').value.trim();
+    }
+
+    function showErr(msg) {
+      $('err').textContent = msg || '';
+    }
+
+    async function api(path) {
+      const headers = { Accept: 'application/json' };
+      const key = apiKey();
+      if (key) headers.Authorization = 'Bearer ' + key;
+      const res = await fetch(path, { headers });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
+      if (!res.ok) throw new Error((json && json.error) || res.status + ' ' + path);
+      return json;
+    }
+
+    async function refresh() {
+      showErr('');
+      try {
+        const [health, ready, infra, pools, inv] = await Promise.all([
+          api('/health'),
+          api('/ready'),
+          api('/v1/admin/infra/status'),
+          api('/v1/admin/ip-pools'),
+          api('/v1/admin/ip-inventory'),
+        ]);
+        $('healthPills').innerHTML =
+          '<span class="pill ok">health ok</span>' +
+          (ready.ready ? '<span class="pill ok">ready</span>' : '<span class="pill bad">not ready</span>');
+        $('healthOut').textContent = JSON.stringify({ health, ready }, null, 2);
+        const mult = infra?.infra?.multiplier ?? 1;
+        const multClass = mult < 1 ? 'warn' : 'ok';
+        $('infraOut').textContent = JSON.stringify(infra, null, 2);
+        $('infraOut').insertAdjacentHTML('beforebegin', '');
+        $('poolsOut').textContent = JSON.stringify(pools, null, 2);
+        $('invOut').textContent = JSON.stringify(inv, null, 2);
+        void multClass;
+      } catch (e) {
+        showErr(e.message || String(e));
+      }
+    }
+
+    $('saveKey').onclick = () => {
+      localStorage.setItem(keyStore, apiKey());
+      refresh();
+    };
+    $('refreshAll').onclick = refresh;
+    $('lookupTenant').onclick = async () => {
+      showErr('');
+      try {
+        const id = $('tenantId').value.trim();
+        if (!id) return;
+        const data = await api('/v1/admin/tenants/' + encodeURIComponent(id) + '/routing');
+        $('tenantOut').textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        showErr(e.message || String(e));
+      }
+    };
+    $('lookupMsg').onclick = async () => {
+      showErr('');
+      try {
+        const id = $('messageId').value.trim();
+        if (!id) return;
+        const data = await api('/v1/messages/' + encodeURIComponent(id));
+        $('msgOut').textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        showErr(e.message || String(e));
+      }
+    };
+
+    refresh();
+  </script>
+</body>
+</html>

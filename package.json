@@ -26,6 +26,7 @@
     "validate:track-6e": "node scripts/validate-track-6e.js",
     "validate:track-6f": "node scripts/validate-track-6f.js",
     "validate:track-6": "npm run validate:track-6a && npm run validate:track-6b && npm run validate:track-6c && npm run validate:track-6d && npm run validate:track-6e && npm run validate:track-6f",
+    "validate:isolation": "node scripts/validate-isolation.js",
     "simulate:complaint": "node scripts/simulate-complaint.js",
     "simulate:bounce": "node scripts/simulate-bounce.js",
     "db:migrate": "node scripts/migrate.js",
