@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import {
   classifySmtpError,
   loadConfig,
+  isBindableIp,
   type MailSendOptions,
   type MailSendResult,
 } from '@vmds/shared';
@@ -22,6 +23,13 @@ function buildMailPayload(options: MailSendOptions) {
     text: options.text ?? (options.html ? undefined : options.subject),
   };
 
+  if (options.listUnsubscribeUrl) {
+    mail.headers = {
+      'List-Unsubscribe': `<${options.listUnsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    };
+  }
+
   if (options.dkim) {
     mail.dkim = {
       domainName: options.dkim.domainName,
@@ -31,6 +39,13 @@ function buildMailPayload(options: MailSendOptions) {
   }
 
   return mail;
+}
+
+function transportLocalAddress(localAddress?: string): string | undefined {
+  if (!localAddress || !isBindableIp(localAddress)) {
+    return undefined;
+  }
+  return localAddress;
 }
 
 export async function resolveMxHost(domain: string): Promise<string> {
@@ -43,14 +58,23 @@ export async function resolveMxHost(domain: string): Promise<string> {
 }
 
 export async function sendDirectMail(options: MailSendOptions): Promise<MailSendResult> {
+  const config = loadConfig();
   const recipientDomain = options.to[0].email.split('@')[1];
   const mxHost = await resolveMxHost(recipientDomain);
+  const localAddress = transportLocalAddress(options.localAddress);
+
+  if (config.EGRESS_BIND_REQUIRED && options.localAddress && !localAddress) {
+    throw classifySmtpError(
+      new Error(`Egress IP "${options.localAddress}" is not bindable / not attached`)
+    );
+  }
 
   const transporter = nodemailer.createTransport({
     host: mxHost,
     port: 25,
     secure: false,
     tls: { rejectUnauthorized: false },
+    ...(localAddress ? { localAddress } : {}),
   });
 
   try {
@@ -68,6 +92,7 @@ export async function sendDirectMail(options: MailSendOptions): Promise<MailSend
 
 export async function sendRelayMail(options: MailSendOptions): Promise<MailSendResult> {
   const config = loadConfig();
+  // Mailpit/relay: localAddress is informational only (cannot multi-home easily)
   const transporter = nodemailer.createTransport({
     host: config.SMTP_HOST,
     port: config.SMTP_PORT,

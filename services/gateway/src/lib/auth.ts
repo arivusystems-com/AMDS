@@ -15,10 +15,13 @@ export function createAuthHook() {
       pathname === '/health' ||
       pathname === '/ready' ||
       pathname === '/metrics' ||
+      pathname === '/ops' ||
+      pathname === '/ops/' ||
       pathname === '/v1/openapi.yaml' ||
       pathname === '/v1/openapi.json' ||
       pathname.startsWith('/t/') ||
-      pathname.startsWith('/c/')
+      pathname.startsWith('/c/') ||
+      pathname.startsWith('/u/')
     ) {
       return;
     }

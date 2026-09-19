@@ -7,6 +7,10 @@ import {
   simulateComplaintSchema,
   simulateInfraPressureSchema,
   recordNegativeSignalSchema,
+  assignDedicatedIpSchema,
+  registerInventoryIpSchema,
+  riskTierFromScore,
+  resolvePoolId,
 } from '@vmds/shared';
 import { getPool } from '../lib/db.js';
 import { processBounce } from '../lib/bounce-handler.js';
@@ -15,6 +19,7 @@ import {
   adminOverrideReputation,
   formatReputationResponse,
   applyNegativeReputationSignal,
+  getTenantReputation,
 } from '../lib/reputation-engine.js';
 import {
   setSimulatedInfraPressure,
@@ -23,6 +28,13 @@ import {
 } from '../lib/infra-state.js';
 import { getEgressIpStatus } from '../lib/egress-ip.js';
 import { getIpPoolRows, formatIpPoolResponse } from '../lib/ip-pools.js';
+import {
+  listInventory,
+  upsertInventoryIp,
+  listTenantAssignments,
+  assignDedicatedIp,
+  releaseDedicatedIp,
+} from '../lib/ip-inventory.js';
 import { getQueue } from '../lib/queue.js';
 import { getCampaignQueue } from '../lib/campaign-queue.js';
 
@@ -150,6 +162,118 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ pools: rows.map(formatIpPoolResponse) });
   });
 
+  app.get('/v1/admin/ip-inventory', async (_request, reply) => {
+    const pool = getPool();
+    const rows = await listInventory(pool);
+    return reply.send({
+      inventory: rows.map((row) => ({
+        ...row,
+        updated_at: row.updated_at.toISOString(),
+      })),
+    });
+  });
+
+  app.post('/v1/admin/ip-inventory', async (request, reply) => {
+    const parsed = registerInventoryIpSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'Validation failed',
+        details: parsed.error.flatten(),
+      });
+    }
+    const pool = getPool();
+    const row = await upsertInventoryIp(pool, parsed.data);
+    return reply.code(201).send({
+      ...row,
+      updated_at: row.updated_at.toISOString(),
+    });
+  });
+
+  app.get('/v1/admin/egress-assignments', async (request, reply) => {
+    const tenantId =
+      typeof request.query === 'object' && request.query && 'tenant_id' in request.query
+        ? String((request.query as { tenant_id?: string }).tenant_id ?? '')
+        : '';
+    const pool = getPool();
+    const rows = await listTenantAssignments(pool, tenantId || undefined);
+    return reply.send({ assignments: rows });
+  });
+
+  app.post<{ Params: { tenantId: string } }>(
+    '/v1/admin/tenants/:tenantId/egress',
+    async (request, reply) => {
+      const parsed = assignDedicatedIpSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'Validation failed',
+          details: parsed.error.flatten(),
+        });
+      }
+      const pool = getPool();
+      try {
+        const assignment = await assignDedicatedIp(
+          pool,
+          request.params.tenantId,
+          parsed.data.purpose,
+          parsed.data.egress_ip
+        );
+        return reply.code(201).send(assignment);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Assign failed';
+        return reply.code(409).send({ error: message });
+      }
+    }
+  );
+
+  app.delete<{ Params: { tenantId: string; purpose: string } }>(
+    '/v1/admin/tenants/:tenantId/egress/:purpose',
+    async (request, reply) => {
+      const purpose = request.params.purpose;
+      if (purpose !== 'transaction' && purpose !== 'marketing') {
+        return reply.code(400).send({ error: 'purpose must be transaction or marketing' });
+      }
+      const pool = getPool();
+      const result = await releaseDedicatedIp(pool, request.params.tenantId, purpose);
+      return reply.send(result);
+    }
+  );
+
+  app.get<{ Params: { tenantId: string } }>(
+    '/v1/admin/tenants/:tenantId/routing',
+    async (request, reply) => {
+      const pool = getPool();
+      const config = loadConfig();
+      let score = config.REPUTATION_DEFAULT_SCORE;
+      try {
+        const rep = await getTenantReputation(pool, request.params.tenantId);
+        score = rep.score;
+      } catch {
+        // default
+      }
+      const tier = riskTierFromScore(score);
+      const policy = await pool.query(
+        `SELECT ip_pool FROM tenant_policies WHERE tenant_id = $1`,
+        [request.params.tenantId]
+      );
+      const override = (policy.rows[0]?.ip_pool as string | null) ?? null;
+      const txPool = resolvePoolId('transaction', override, score);
+      const mktPool = resolvePoolId('campaign', override, score);
+      const assignments = await listTenantAssignments(pool, request.params.tenantId);
+
+      return reply.send({
+        tenant_id: request.params.tenantId,
+        reputation_score: score,
+        risk_tier: tier,
+        policy_ip_pool: override,
+        resolved: {
+          transaction_pool: txPool,
+          marketing_pool: mktPool,
+        },
+        dedicated: assignments,
+      });
+    }
+  );
+
   app.post('/v1/admin/infra/simulate-pressure', async (request, reply) => {
     const config = loadConfig();
     if (config.NODE_ENV === 'production') {
@@ -201,10 +325,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     const pressure = await getInfraPressureSnapshot(queueDepth);
     const egress = await getEgressIpStatus(pool, config.EGRESS_IP);
+    const pools = await getIpPoolRows(pool);
+    const inventory = await listInventory(pool);
 
     return reply.send({
       infra: pressure,
       egress,
+      pools: pools.map(formatIpPoolResponse),
+      inventory_summary: {
+        total: inventory.length,
+        free: inventory.filter((i) => i.state === 'free').length,
+        assigned: inventory.filter((i) => i.state === 'assigned').length,
+        shared: inventory.filter((i) => i.state === 'shared').length,
+        quarantine: inventory.filter((i) => i.state === 'quarantine').length,
+      },
     });
   });
 

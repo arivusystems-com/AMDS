@@ -65,6 +65,18 @@ export const configSchema = z.object({
   EGRESS_IP: z.string().min(1).default('default'),
   EGRESS_IP_TRANSACTION: z.string().optional(),
   EGRESS_IP_MARKETING: z.string().optional(),
+  EGRESS_IP_MARKETING_HEALTHY: z.string().optional(),
+  EGRESS_IP_MARKETING_STANDARD: z.string().optional(),
+  EGRESS_IP_MARKETING_RESTRICTED: z.string().optional(),
+  /** When true (typical production direct mode), refuse send if egress IP is not a real bindable address. */
+  EGRESS_BIND_REQUIRED: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('false'),
+  OPS_UI_ENABLED: z
+    .string()
+    .transform((v) => v !== 'false')
+    .default('true'),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -101,7 +113,8 @@ export type MessageEventType =
   | 'suppressed'
   | 'opened'
   | 'clicked'
-  | 'complained';
+  | 'complained'
+  | 'unsubscribed';
 
 export interface SendMessageJob {
   messageId: string;
@@ -134,7 +147,8 @@ export interface WebhookEvent {
     | 'message.bounced'
     | 'message.complained'
     | 'message.opened'
-    | 'message.clicked';
+    | 'message.clicked'
+    | 'message.unsubscribed';
   timestamp: string;
   tenant_id: string;
   message_id: string;
@@ -208,6 +222,9 @@ export interface MailSendOptions {
   subject: string;
   html?: string;
   text?: string;
+  /** Source IP for SMTP bind (direct mode). */
+  localAddress?: string;
+  listUnsubscribeUrl?: string;
   dkim?: {
     domainName: string;
     keySelector: string;

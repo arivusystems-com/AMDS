@@ -28,6 +28,25 @@ export const simulateInfraPressureSchema = z.object({
 
 export type SimulateInfraPressureRequest = z.infer<typeof simulateInfraPressureSchema>;
 
+export const assignDedicatedIpSchema = z.object({
+  purpose: z.enum(['transaction', 'marketing']),
+  egress_ip: z.string().min(1).max(64).optional(),
+});
+
+export type AssignDedicatedIpRequest = z.infer<typeof assignDedicatedIpSchema>;
+
+export const registerInventoryIpSchema = z.object({
+  egress_ip: z.string().min(1).max(64),
+  purpose: z.enum(['transaction', 'marketing']).optional(),
+  risk_tier: z.enum(['healthy', 'standard', 'restricted']).optional(),
+  attached: z.boolean().default(true),
+  ptr_configured: z.boolean().default(false),
+  notes: z.string().max(500).optional(),
+  state: z.enum(['free', 'assigned', 'quarantine', 'warming', 'shared']).default('free'),
+});
+
+export type RegisterInventoryIpRequest = z.infer<typeof registerInventoryIpSchema>;
+
 export const recordNegativeSignalSchema = z.object({
   signal_type: z.enum(['blacklist', 'spam_trap']),
   reason: z.string().min(1).max(500),

@@ -22,7 +22,7 @@ export type VerifyDomainRequest = z.infer<typeof verifyDomainSchema>;
 export const createSuppressionSchema = z.object({
   tenant_id: z.string().min(1).max(128),
   email: z.string().email(),
-  reason: z.enum(['hard_bounce', 'complaint', 'manual']).default('manual'),
+  reason: z.enum(['hard_bounce', 'complaint', 'manual', 'unsubscribe']).default('manual'),
 });
 
 export type CreateSuppressionRequest = z.infer<typeof createSuppressionSchema>;

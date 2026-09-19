@@ -99,6 +99,8 @@ export {
   reputationHistoryQuerySchema,
   simulateInfraPressureSchema,
   recordNegativeSignalSchema,
+  assignDedicatedIpSchema,
+  registerInventoryIpSchema,
 } from './reputation-schemas.js';
 export type {
   AdminReputationOverrideRequest,
@@ -106,6 +108,8 @@ export type {
   ReputationHistoryQuery,
   SimulateInfraPressureRequest,
   RecordNegativeSignalRequest,
+  AssignDedicatedIpRequest,
+  RegisterInventoryIpRequest,
 } from './reputation-schemas.js';
 export {
   calculateReputationScore,
@@ -129,10 +133,30 @@ export type { CampaignEstimateQuery } from './throughput-schemas.js';
 export { applyDailyRecoveryCap, recoveryHeadroom } from './recovery.js';
 export {
   poolForQueue,
+  purposeForQueue,
   resolvePoolId,
   resolveEgressIpFromConfig,
+  riskTierFromScore,
+  poolIdForPurposeTier,
+  normalizePoolOverride,
+  isBindableIp,
+  RISK_TIER_HEALTHY_MIN,
+  RISK_TIER_STANDARD_MIN,
+  RISK_TIER_HYSTERESIS,
 } from './ip-pools.js';
-export type { IpPoolId } from './ip-pools.js';
+export type { IpPoolId, RiskTier, SendPurpose } from './ip-pools.js';
+export {
+  attributeFailureClass,
+  shouldAffectTenantReputation,
+  shouldAffectInfraPressure,
+  bounceSignalForFailure,
+} from './failure-attribution.js';
+export type { FailureClass, ClassifiedDeliveryFailure } from './failure-attribution.js';
+export {
+  providerKeyForRecipient,
+  computeLayeredHourlyRate,
+} from './provider-limits.js';
+export type { ProviderKey } from './provider-limits.js';
 export {
   reputationMultiplier,
   warmupMultiplier,

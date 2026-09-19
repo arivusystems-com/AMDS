@@ -23,6 +23,16 @@ docker compose -f docker-compose.prod.yml up -d --scale worker=2
 curl http://localhost:8080/metrics
 ```
 
+## Multi-IP egress (reputation pools)
+
+1. Attach secondary public IPs to the AMDS VNIC (Healthy / Standard / Restricted + optional dedicated pool).
+2. Set PTR for each IP.
+3. Update `ip_pools.egress_ip` (or env `EGRESS_IP_MARKETING_*`) and register in `POST /v1/admin/ip-inventory`.
+4. Set `SMTP_MODE=direct` and `EGRESS_BIND_REQUIRED=true`.
+5. Verify Ops UI `/ops` and `npm run validate:isolation`.
+
+Details: [docs/IP-POOL-ISOLATION.md](../docs/IP-POOL-ISOLATION.md)
+
 ## Multi-worker (BullMQ)
 
 Run **multiple worker processes** against the same Redis queues. BullMQ coordinates job ownership — no duplicate delivery.
@@ -68,10 +78,13 @@ Track 6 policy data is synced from LiteDesk — no additional Vault keys require
 
 ## OCI checklist
 
-See [docs/BUILD-TO-DEPLOY.md](../docs/BUILD-TO-DEPLOY.md) and [docs/runbooks/DEPLOY.md](../docs/runbooks/DEPLOY.md).
+**Full guide:** [docs/OCI-DEPLOY-END-TO-END.md](../docs/OCI-DEPLOY-END-TO-END.md)
+
+Also: [docs/BUILD-TO-DEPLOY.md](../docs/BUILD-TO-DEPLOY.md) · [docs/runbooks/DEPLOY.md](../docs/runbooks/DEPLOY.md).
 
 1. Open port 25 unblock ticket (parallel with local build)
 2. `terraform apply` in `deploy/terraform/` (customize `terraform.tfvars`)
-3. SSH to AMDS compute → run `deploy/scripts/deploy.sh`
-4. Configure security lists (LiteDesk → AMDS `:8080`, block public `/v1/*`)
-5. DNS + PTR + smoke tests
+3. Attach multi-IP egress + PTR (Healthy / Standard / Restricted + tx)
+4. SSH to AMDS compute → configure `.env` → run `deploy/scripts/deploy.sh`
+5. Configure security lists (LiteDesk → AMDS `:8080`, block public `/v1/*`)
+6. DNS + smoke tests + IP warm-up
